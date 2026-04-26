@@ -13,6 +13,7 @@ import menuRoutes from "./routes/menu.routes.js";
 import contactRoutes from "./routes/contact.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import blogRoutes from "./routes/blog.routes.js";
+import orderRoutes from "./routes/order.routes.js";
 
 const app = express();
 
@@ -46,6 +47,7 @@ app.use("/api/menu", menuRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/blog", blogRoutes);
+app.use("/api/orders", orderRoutes);
 
 // ─── Error Handler ───────────────────────────────────────
 app.use(errorHandler);

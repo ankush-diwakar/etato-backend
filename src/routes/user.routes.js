@@ -9,6 +9,7 @@ import {
   getAddresses,
   deleteAddress,
   checkDeliveryZone,
+  recheckAddressZone,
 } from "../controllers/user.controller.js";
 
 const router = Router();
@@ -42,6 +43,7 @@ router.patch("/profile", authenticate, validate(profileSchema), updateProfile);
 router.post("/address", authenticate, validate(addressSchema), addAddress);
 router.get("/addresses", authenticate, getAddresses);
 router.delete("/address/:id", authenticate, deleteAddress);
+router.patch("/address/:id/recheck-zone", authenticate, recheckAddressZone);
 router.post("/check-zone", validate(zoneCheckSchema), checkDeliveryZone);
 
 export default router;

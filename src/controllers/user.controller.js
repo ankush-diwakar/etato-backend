@@ -84,6 +84,30 @@ export async function deleteAddress(req, res) {
 export async function checkDeliveryZone(req, res) {
   const { latitude, longitude } = req.validated;
   const result = isInDeliveryZone(latitude, longitude);
-
   res.json(result);
+}
+
+export async function recheckAddressZone(req, res) {
+  const { id } = req.params;
+
+  const address = await prisma.address.findFirst({
+    where: { id, userId: req.user.id },
+  });
+
+  if (!address) {
+    return res.status(404).json({ error: "Address not found." });
+  }
+
+  if (address.latitude == null || address.longitude == null) {
+    return res.status(400).json({ error: "Address has no coordinates saved. Please delete and re-add it with location detection." });
+  }
+
+  const { inZone, distanceKm } = isInDeliveryZone(address.latitude, address.longitude);
+
+  const updated = await prisma.address.update({
+    where: { id },
+    data: { isInZone: inZone },
+  });
+
+  res.json({ address: updated, isInZone: inZone, distanceKm });
 }

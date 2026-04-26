@@ -29,4 +29,8 @@ export const env = {
 
   SUPER_ADMIN_EMAIL: process.env.SUPER_ADMIN_EMAIL || "etatofoods@gmail.com",
   SUPER_ADMIN_PASSWORD: process.env.SUPER_ADMIN_PASSWORD || "EtatoAdmin@2026",
+
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID || "",
+  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET || "",
+  RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET || "",
 };

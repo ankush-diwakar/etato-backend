@@ -95,3 +95,19 @@ export async function sendContactAutoReply(submission) {
 
   await sendMail(submission.email, `We got your message, ${submission.name}!`, html);
 }
+
+export async function sendSubscriptionAdminAlert(subscription) {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #1B4332;">New Subscription Alert</h2>
+      <table style="width: 100%; border-collapse: collapse;">
+        <tr><td style="padding: 8px; font-weight: bold; color: #3D3D3D;">Customer</td><td style="padding: 8px;">${subscription.user?.name} (${subscription.user?.phone})</td></tr>
+        <tr style="background: #f5f5f5;"><td style="padding: 8px; font-weight: bold; color: #3D3D3D;">Plan</td><td style="padding: 8px;">${subscription.plan?.name}</td></tr>
+        <tr><td style="padding: 8px; font-weight: bold; color: #3D3D3D;">Start Date</td><td style="padding: 8px;">${new Date(subscription.startDate).toLocaleDateString()}</td></tr>
+        <tr style="background: #f5f5f5;"><td style="padding: 8px; font-weight: bold; color: #3D3D3D;">Slot</td><td style="padding: 8px;">${subscription.deliverySlot}</td></tr>
+        <tr><td style="padding: 8px; font-weight: bold; color: #3D3D3D;">Bowl Pref</td><td style="padding: 8px;">${subscription.bowlPreference || "Surprise me"}</td></tr>
+      </table>
+    </div>
+  `;
+  await sendMail(env.SUPER_ADMIN_EMAIL, `New Subscription: ${subscription.plan?.name} for ${subscription.user?.name}`, html);
+}

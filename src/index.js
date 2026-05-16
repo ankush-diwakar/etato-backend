@@ -14,6 +14,7 @@ import contactRoutes from "./routes/contact.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import blogRoutes from "./routes/blog.routes.js";
 import orderRoutes from "./routes/order.routes.js";
+import subscriptionRoutes from "./routes/subscription.routes.js";
 
 const app = express();
 
@@ -37,7 +38,7 @@ app.get("/api/health", (req, res) => {
 });
 
 
-app.get(  "/", (req, res) => {
+app.get("/", (req, res) => {
   res.send("Email server is working");
 });
 
@@ -48,6 +49,7 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/blog", blogRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/subscriptions", subscriptionRoutes);
 
 // ─── Error Handler ───────────────────────────────────────
 app.use(errorHandler);

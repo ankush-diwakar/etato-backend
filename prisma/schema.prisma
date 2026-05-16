@@ -149,7 +149,8 @@ model OrderItem {
 
 model Payment {
   id                String        @id @default(cuid())
-  orderId           String        @unique
+  orderId           String?       @unique
+  subscriptionId    String?       @unique
   razorpayOrderId   String?       @unique
   razorpayPaymentId String?       @unique
   razorpaySignature String?
@@ -162,7 +163,8 @@ model Payment {
   refundedAt        DateTime?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
-  order             Order         @relation(fields: [orderId], references: [id])
+  order             Order?        @relation(fields: [orderId], references: [id])
+  subscription      Subscription? @relation(fields: [subscriptionId], references: [id])
 
   @@index([razorpayOrderId])
   @@map("payments")
@@ -203,6 +205,7 @@ model Subscription {
   updatedAt      DateTime           @updatedAt
   plan           SubscriptionPlan   @relation(fields: [planId], references: [id])
   user           User               @relation(fields: [userId], references: [id])
+  payment        Payment?
 
   @@index([userId])
   @@index([status])

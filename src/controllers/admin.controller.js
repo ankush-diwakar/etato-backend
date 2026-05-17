@@ -2,6 +2,7 @@ import prisma from "../config/db.js";
 import { env } from "../config/env.js";
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 
 // ─── DASHBOARD STATS ────────────────────────────────────
 
@@ -157,7 +158,22 @@ export async function getCustomers(req, res) {
   const customers = await prisma.user.findMany({
     where: { role: "CUSTOMER" },
     orderBy: { createdAt: "desc" },
-    select: { id: true, name: true, email: true, phone: true, status: true, createdAt: true },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      status: true,
+      createdAt: true,
+      subscriptions: {
+        where: {
+          status: { in: ["ACTIVE", "PAUSED", "PENDING"] }
+        },
+        include: {
+          plan: true
+        }
+      }
+    },
   });
   res.json({ customers });
 }
@@ -171,6 +187,99 @@ export async function updateCustomerStatus(req, res) {
     select: { id: true, name: true, status: true },
   });
   res.json({ customer });
+}
+
+export async function adminAddCustomerSubscription(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { planId, deliverySlot, dietaryPref, bowlPreference, startDate } = req.validated;
+
+    const user = await prisma.user.findUnique({ where: { id } });
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Check existing active or paused subscriptions
+    const existingActiveSub = await prisma.subscription.findFirst({
+      where: {
+        userId: id,
+        status: { in: ["ACTIVE", "PAUSED"] },
+      },
+    });
+    if (existingActiveSub) {
+      return res.status(400).json({ error: "User already has an active or paused subscription" });
+    }
+
+    const plan = await prisma.subscriptionPlan.findUnique({ where: { id: planId } });
+    if (!plan || !plan.isActive) {
+      return res.status(404).json({ error: "Active subscription plan not found" });
+    }
+
+    const start = new Date(startDate);
+    if (isNaN(start.getTime())) {
+      return res.status(400).json({ error: "Invalid start date" });
+    }
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + plan.durationDays);
+
+    // Create Subscription
+    const subscription = await prisma.subscription.create({
+      data: {
+        userId: id,
+        planId,
+        deliverySlot,
+        dietaryPref: dietaryPref || "REGULAR_VEG",
+        bowlPreference,
+        startDate: start,
+        endDate: end,
+        status: "ACTIVE",
+      },
+      include: {
+        plan: true,
+      }
+    });
+
+    // Create Captured Payment
+    const payment = await prisma.payment.create({
+      data: {
+        subscriptionId: subscription.id,
+        amount: plan.price * 100, // paise
+        status: "CAPTURED",
+        method: "MANUAL_ADMIN",
+        razorpayPaymentId: `MANUAL_${crypto.randomBytes(4).toString("hex").toUpperCase()}`,
+        paidAt: new Date(),
+      },
+    });
+
+    res.status(201).json({
+      message: "Subscription added successfully",
+      subscription,
+      payment,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function adminUpdateCustomerSubscriptionStatus(req, res, next) {
+  try {
+    const { subId } = req.params;
+    const { status } = req.validated;
+
+    const updated = await prisma.subscription.update({
+      where: { id: subId },
+      data: { status },
+      include: {
+        plan: true,
+      }
+    });
+
+    res.json({
+      message: `Subscription status updated to ${status}`,
+      subscription: updated,
+    });
+  } catch (error) {
+    next(error);
+  }
 }
 
 // ─── CONTACTS ───────────────────────────────────────────
@@ -281,4 +390,45 @@ export async function deleteBlogPost(req, res) {
   const { id } = req.params;
   await prisma.blogPost.delete({ where: { id } });
   res.json({ message: "Post deleted" });
+}
+
+export async function getPayments(req, res, next) {
+  try {
+    const payments = await prisma.payment.findMany({
+      orderBy: { createdAt: "desc" },
+      include: {
+        order: {
+          select: {
+            orderNumber: true,
+            user: {
+              select: {
+                name: true,
+                email: true
+              }
+            }
+          }
+        },
+        subscription: {
+          select: {
+            id: true,
+            plan: {
+              select: {
+                name: true
+              }
+            },
+            user: {
+              select: {
+                name: true,
+                email: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    res.json({ payments });
+  } catch (error) {
+    next(error);
+  }
 }

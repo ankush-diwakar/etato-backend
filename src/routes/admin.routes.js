@@ -52,8 +52,22 @@ router.delete("/menu/:id", adminController.deleteMenuItem);
 router.post("/menu/:id/image", setUploadPath("menu"), upload.single("image"), adminController.uploadMenuItemImage);
 
 // ─── CUSTOMERS ──────────────────────────────────────────
+const adminAddSubscriptionSchema = z.object({
+  planId: z.string().min(1),
+  deliverySlot: z.enum(["LUNCH", "DINNER"]),
+  dietaryPref: z.enum(["REGULAR_VEG", "JAIN"]).default("REGULAR_VEG"),
+  bowlPreference: z.string().optional().nullable(),
+  startDate: z.string().min(1),
+});
+
+const adminUpdateSubscriptionStatusSchema = z.object({
+  status: z.enum(["ACTIVE", "PAUSED", "CANCELLED", "COMPLETED", "EXPIRED"]),
+});
+
 router.get("/customers", adminController.getCustomers);
 router.patch("/customers/:id/status", validate(z.object({ status: z.enum(["ACTIVE", "BLOCKED", "DEACTIVATED"]) })), adminController.updateCustomerStatus);
+router.post("/customers/:id/subscription", validate(adminAddSubscriptionSchema), adminController.adminAddCustomerSubscription);
+router.patch("/customers/subscription/:subId/status", validate(adminUpdateSubscriptionStatusSchema), adminController.adminUpdateCustomerSubscriptionStatus);
 
 // ─── CONTACTS ───────────────────────────────────────────
 router.get("/contacts", adminController.getContacts);
@@ -77,5 +91,8 @@ router.post("/blog", validate(blogSchema), adminController.createBlogPost);
 router.put("/blog/:id", validate(blogSchema.partial()), adminController.updateBlogPost);
 router.delete("/blog/:id", adminController.deleteBlogPost);
 router.post("/blog/:id/cover", setUploadPath("blog"), upload.single("image"), adminController.uploadBlogCover);
+
+// ─── PAYMENTS ───────────────────────────────────────────
+router.get("/payments", adminController.getPayments);
 
 export default router;

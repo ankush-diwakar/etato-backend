@@ -4,7 +4,8 @@ import {
     createSubscription,
     verifySubscriptionPayment,
     getUserSubscriptions,
-    getSubscriptionDetail
+    getSubscriptionDetail,
+    cancelPendingSubscription,
 } from "../controllers/subscription.controller.js";
 import { authenticate } from "../middleware/auth.js";
 
@@ -19,5 +20,6 @@ router.post("/", createSubscription);
 router.post("/verify", verifySubscriptionPayment);
 router.get("/", getUserSubscriptions);
 router.get("/:id", getSubscriptionDetail);
+router.delete("/:id", cancelPendingSubscription);
 
 export default router;

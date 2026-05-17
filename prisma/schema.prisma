@@ -312,6 +312,7 @@ enum SubscriptionPlanType {
 }
 
 enum SubscriptionStatus {
+  PENDING
   ACTIVE
   PAUSED
   CANCELLED

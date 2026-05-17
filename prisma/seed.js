@@ -4,8 +4,100 @@ import "dotenv/config";
 
 const prisma = new PrismaClient();
 
+function normalizeIngredients(value) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+async function loadSeedSnapshot() {
+  try {
+    const module = await import("./seed.data.js");
+    return module.seedData || null;
+  } catch {
+    return null;
+  }
+}
+
+async function seedFromSnapshot(seedData) {
+  const {
+    users = [],
+    refreshTokens = [],
+    addresses = [],
+    categories = [],
+    menuItems = [],
+    coupons = [],
+    subscriptionPlans = [],
+    subscriptions = [],
+    orders = [],
+    orderItems = [],
+    payments = [],
+    contactSubmissions = [],
+    blogPosts = [],
+    siteSettings = [],
+  } = seedData;
+
+  if (users.length) await prisma.user.createMany({ data: users, skipDuplicates: true });
+  if (refreshTokens.length)
+    await prisma.refreshToken.createMany({ data: refreshTokens, skipDuplicates: true });
+  if (addresses.length)
+    await prisma.address.createMany({ data: addresses, skipDuplicates: true });
+  if (categories.length)
+    await prisma.category.createMany({ data: categories, skipDuplicates: true });
+  if (menuItems.length) {
+    const normalizedMenuItems = menuItems.map((item) => ({
+      ...item,
+      ingredients: normalizeIngredients(item.ingredients),
+    }));
+    await prisma.menuItem.createMany({ data: normalizedMenuItems, skipDuplicates: true });
+  }
+  if (coupons.length)
+    await prisma.coupon.createMany({ data: coupons, skipDuplicates: true });
+  if (subscriptionPlans.length)
+    await prisma.subscriptionPlan.createMany({
+      data: subscriptionPlans,
+      skipDuplicates: true,
+    });
+  if (subscriptions.length)
+    await prisma.subscription.createMany({ data: subscriptions, skipDuplicates: true });
+  if (orders.length) await prisma.order.createMany({ data: orders, skipDuplicates: true });
+  if (orderItems.length)
+    await prisma.orderItem.createMany({ data: orderItems, skipDuplicates: true });
+  if (payments.length)
+    await prisma.payment.createMany({ data: payments, skipDuplicates: true });
+  if (contactSubmissions.length)
+    await prisma.contactSubmission.createMany({
+      data: contactSubmissions,
+      skipDuplicates: true,
+    });
+  if (blogPosts.length)
+    await prisma.blogPost.createMany({ data: blogPosts, skipDuplicates: true });
+  if (siteSettings.length)
+    await prisma.siteSetting.createMany({ data: siteSettings, skipDuplicates: true });
+}
+
 async function main() {
   console.log("🌱 Seeding database...\n");
+
+  const snapshot = await loadSeedSnapshot();
+  if (snapshot) {
+    console.log("📦 Using prisma/seed.data.js snapshot");
+    await seedFromSnapshot(snapshot);
+    console.log("✅ Snapshot seed complete\n");
+    return;
+  }
 
   // ─── Super Admin ─────────────────────────────────────
   const adminEmail = process.env.SUPER_ADMIN_EMAIL || "etatofoods@gmail.com";

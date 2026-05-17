@@ -4,6 +4,24 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 
+function normalizeIngredients(value) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
 // ─── DASHBOARD STATS ────────────────────────────────────
 
 export async function getDashboardStats(req, res) {
@@ -29,7 +47,11 @@ export async function getMenuItems(req, res) {
     include: { category: { select: { id: true, name: true } } },
     orderBy: [{ category: { sortOrder: "asc" } }, { sortOrder: "asc" }],
   });
-  res.json({ items });
+  const normalized = items.map((item) => ({
+    ...item,
+    ingredients: normalizeIngredients(item.ingredients),
+  }));
+  res.json({ items: normalized });
 }
 
 export async function getMenuItem(req, res) {
@@ -37,19 +59,25 @@ export async function getMenuItem(req, res) {
     where: { id: req.params.id },
   });
   if (!item) return res.status(404).json({ error: "Item not found" });
-  res.json({ item });
+  res.json({
+    item: {
+      ...item,
+      ingredients: normalizeIngredients(item.ingredients),
+    },
+  });
 }
 
 export async function createMenuItem(req, res) {
   const { name, dressing, categoryId, protein, calories, carbs, fat, fiber, ingredients, price, jain, status, isFeatured, sortOrder } = req.validated;
-  
+  const normalizedIngredients = normalizeIngredients(ingredients);
+
   // Generate slug
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
 
   const item = await prisma.menuItem.create({
     data: {
       name, slug, dressing, categoryId, protein, calories, carbs, fat, fiber,
-      ingredients, price, jain, status, isFeatured, sortOrder
+      ingredients: normalizedIngredients, price, jain, status, isFeatured, sortOrder
     },
   });
   res.status(201).json({ item });
@@ -58,9 +86,12 @@ export async function createMenuItem(req, res) {
 export async function updateMenuItem(req, res) {
   const { id } = req.params;
   const data = req.validated;
-  
+
   if (data.name) {
     data.slug = data.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
+  }
+  if (Object.prototype.hasOwnProperty.call(data, "ingredients")) {
+    data.ingredients = normalizeIngredients(data.ingredients);
   }
 
   const item = await prisma.menuItem.update({
@@ -90,17 +121,42 @@ export async function deleteMenuItem(req, res) {
   res.json({ message: "Menu item deactivated" });
 }
 
+export async function deleteMenuItemPermanently(req, res) {
+  const { id } = req.params;
+
+  const item = await prisma.menuItem.findUnique({ where: { id } });
+  if (!item) return res.status(404).json({ error: "Item not found" });
+
+  const orderItemsCount = await prisma.orderItem.count({ where: { menuItemId: id } });
+  if (orderItemsCount > 0) {
+    return res.status(400).json({ error: "Cannot delete item with existing orders" });
+  }
+
+  if (item.imageUrl && item.imageUrl.includes("/uploads/menu/")) {
+    const fileName = item.imageUrl.split("/uploads/menu/")[1];
+    if (fileName) {
+      const filePath = path.join(process.cwd(), "uploads", "menu", fileName);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+  }
+
+  await prisma.menuItem.delete({ where: { id } });
+  res.json({ message: "Menu item deleted" });
+}
+
 export async function uploadMenuItemImage(req, res) {
   if (!req.file) return res.status(400).json({ error: "No image file provided" });
-  
+
   const { id } = req.params;
   const imageUrl = `${env.CLIENT_URL.replace('8080', '4000')}/uploads/menu/${req.file.filename}`; // serve from backend
-  
+
   const item = await prisma.menuItem.update({
     where: { id },
     data: { imageUrl },
   });
-  
+
   res.json({ imageUrl, item });
 }
 
@@ -116,7 +172,7 @@ export async function getCategories(req, res) {
 export async function createCategory(req, res) {
   const { name, sortOrder, isActive } = req.validated;
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
-  
+
   const category = await prisma.category.create({
     data: { name, slug, sortOrder, isActive },
   });
@@ -126,7 +182,7 @@ export async function createCategory(req, res) {
 export async function updateCategory(req, res) {
   const { id } = req.params;
   const { name, sortOrder, isActive } = req.validated;
-  
+
   let data = { sortOrder, isActive };
   if (name) {
     data.name = name;
@@ -142,7 +198,7 @@ export async function updateCategory(req, res) {
 
 export async function deleteCategory(req, res) {
   const { id } = req.params;
-  
+
   const itemsCount = await prisma.menuItem.count({ where: { categoryId: id } });
   if (itemsCount > 0) {
     return res.status(400).json({ error: "Cannot delete category with linked menu items" });
@@ -334,7 +390,7 @@ export async function getBlogPost(req, res) {
 export async function createBlogPost(req, res) {
   const { title, excerpt, body, category, status } = req.validated;
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
-  
+
   // simple read time calc
   const words = body.split(/\s+/).length;
   const readTime = `${Math.ceil(words / 200)} min read`;
@@ -351,7 +407,7 @@ export async function createBlogPost(req, res) {
 export async function updateBlogPost(req, res) {
   const { id } = req.params;
   const { title, excerpt, body, category, status } = req.validated;
-  
+
   let data = { excerpt, body, category, status };
   if (title) {
     data.title = title;
@@ -374,15 +430,15 @@ export async function updateBlogPost(req, res) {
 
 export async function uploadBlogCover(req, res) {
   if (!req.file) return res.status(400).json({ error: "No image file provided" });
-  
+
   const { id } = req.params;
   const coverUrl = `${env.CLIENT_URL.replace('8080', '4000')}/uploads/blog/${req.file.filename}`;
-  
+
   const post = await prisma.blogPost.update({
     where: { id },
     data: { coverUrl },
   });
-  
+
   res.json({ coverUrl, post });
 }
 

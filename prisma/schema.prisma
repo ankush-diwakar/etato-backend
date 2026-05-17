@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -85,7 +85,7 @@ model MenuItem {
   carbs       String?
   fat         String?
   fiber       String?
-  ingredients String[]
+  ingredients Json
   price       Int?
   jain        Boolean        @default(false)
   imageUrl    String?

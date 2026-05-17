@@ -49,6 +49,7 @@ router.post("/menu", validate(menuItemSchema), adminController.createMenuItem);
 router.put("/menu/:id", validate(menuItemSchema.partial()), adminController.updateMenuItem);
 router.patch("/menu/:id/status", validate(z.object({ status: menuItemSchema.shape.status })), adminController.updateMenuItemStatus);
 router.delete("/menu/:id", adminController.deleteMenuItem);
+router.delete("/menu/:id/permanent", adminController.deleteMenuItemPermanently);
 router.post("/menu/:id/image", setUploadPath("menu"), upload.single("image"), adminController.uploadMenuItemImage);
 
 // ─── CUSTOMERS ──────────────────────────────────────────

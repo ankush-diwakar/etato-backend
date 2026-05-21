@@ -3,6 +3,8 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
+import fs from "fs";
+import path from "path";
 import { env } from "./config/env.js";
 import { apiLimiter } from "./middleware/rateLimiter.js";
 import { errorHandler } from "./middleware/errorHandler.js";
@@ -19,7 +21,24 @@ import subscriptionRoutes from "./routes/subscription.routes.js";
 const app = express();
 
 // ─── Global Middleware ───────────────────────────────────
-app.use(helmet({ crossOriginResourcePolicy: false }));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'", "https:", "data:", "blob:"],
+        baseUri: ["'self'"],
+        frameAncestors: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:", "blob:"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https:"],
+        fontSrc: ["'self'", "data:", "https:"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https:"],
+        frameSrc: ["'self'", "https:"],
+        connectSrc: ["'self'", "https:"],
+      },
+    },
+  })
+);
 app.use(cors({
   origin: env.CLIENT_URL,
   credentials: true,
@@ -38,10 +57,6 @@ app.get("/api/health", (req, res) => {
 });
 
 
-app.get("/", (req, res) => {
-  res.send("Email server is working");
-});
-
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/menu", menuRoutes);
@@ -50,6 +65,22 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/blog", blogRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
+
+// Serve frontend build if present
+const frontendDist = path.join(process.cwd(), "dist");
+if (fs.existsSync(frontendDist)) {
+  app.use(express.static(frontendDist));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/uploads")) {
+      return next();
+    }
+    res.sendFile(path.join(frontendDist, "index.html"));
+  });
+} else {
+  app.get("/", (req, res) => {
+    res.send("Email server is working");
+  });
+}
 
 // ─── Error Handler ───────────────────────────────────────
 app.use(errorHandler);

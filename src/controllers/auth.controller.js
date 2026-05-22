@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
-import prisma from "../config/db.js";
+import crypto from "crypto";
+import { execute, query } from "../config/db.js";
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -24,16 +25,22 @@ function sanitizeUser(user) {
 export async function signup(req, res) {
   const { name, email, password } = req.validated;
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
+  const existingRows = await query("SELECT id FROM users WHERE email = ? LIMIT 1", [email]);
+  if (existingRows.length > 0) {
     return res.status(409).json({ error: "An account with this email already exists." });
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
 
-  const user = await prisma.user.create({
-    data: { name, email, passwordHash },
-  });
+  const userId = crypto.randomUUID();
+
+  await execute(
+    "INSERT INTO users (id, email, passwordHash, name, createdAt, updatedAt) VALUES (?, ?, ?, ?, NOW(3), NOW(3))",
+    [userId, email, passwordHash, name]
+  );
+
+  const rows = await query("SELECT * FROM users WHERE id = ? LIMIT 1", [userId]);
+  const user = rows[0];
 
   const accessToken = generateAccessToken(user);
   const refresh = await generateRefreshToken(user);
@@ -41,7 +48,7 @@ export async function signup(req, res) {
   res.cookie("etato_refresh", refresh.token, REFRESH_COOKIE_OPTIONS);
 
   // Send welcome email (non-blocking)
-  sendWelcomeEmail(user).catch(() => {});
+  sendWelcomeEmail(user).catch(() => { });
 
   res.status(201).json({
     user: sanitizeUser(user),
@@ -52,7 +59,8 @@ export async function signup(req, res) {
 export async function login(req, res) {
   const { email, password } = req.validated;
 
-  const user = await prisma.user.findUnique({ where: { email } });
+  const rows = await query("SELECT * FROM users WHERE email = ? LIMIT 1", [email]);
+  const user = rows[0];
   if (!user) {
     return res.status(401).json({ error: "Invalid email or password." });
   }

@@ -1,5 +1,17 @@
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const mysql = require("mysql2/promise");
+require("dotenv/config");
+
+const dbUrl = new URL(process.env.DATABASE_URL);
+const pool = mysql.createPool({
+  host: dbUrl.hostname,
+  user: decodeURIComponent(dbUrl.username),
+  password: decodeURIComponent(dbUrl.password),
+  database: dbUrl.pathname.replace(/^\//, ""),
+  port: dbUrl.port ? Number(dbUrl.port) : 3306,
+  waitForConnections: true,
+  connectionLimit: 5,
+  queueLimit: 0,
+});
 
 async function addPlans() {
   const plans = [
@@ -42,15 +54,38 @@ async function addPlans() {
   ];
 
   for (const plan of plans) {
-    await prisma.subscriptionPlan.upsert({
-      where: { id: plan.id },
-      update: plan,
-      create: plan
-    });
-    console.log('Added plan:', plan.name);
+    await pool.execute(
+      `INSERT INTO subscription_plans
+        (id, name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive, sortOrder, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NOW(3), NOW(3))
+       ON DUPLICATE KEY UPDATE
+         name = VALUES(name),
+         type = VALUES(type),
+         durationDays = VALUES(durationDays),
+         bowlsCount = VALUES(bowlsCount),
+         originalPrice = VALUES(originalPrice),
+         price = VALUES(price),
+         discountPct = VALUES(discountPct),
+         perBowlPrice = VALUES(perBowlPrice),
+         sortOrder = VALUES(sortOrder),
+         updatedAt = NOW(3)`,
+      [
+        plan.id,
+        plan.name,
+        plan.type,
+        plan.durationDays,
+        plan.bowlsCount,
+        plan.originalPrice,
+        plan.price,
+        plan.discountPct,
+        plan.perBowlPrice,
+        plan.sortOrder,
+      ]
+    );
+    console.log("Added plan:", plan.name);
   }
 }
 
 addPlans()
   .catch(console.error)
-  .finally(() => prisma.$disconnect());
+  .finally(() => pool.end());

@@ -1,5 +1,5 @@
 import { verifyAccessToken } from "../services/token.service.js";
-import prisma from "../config/db.js";
+import { query } from "../config/db.js";
 
 export async function authenticate(req, res, next) {
   try {
@@ -11,19 +11,11 @@ export async function authenticate(req, res, next) {
     const token = header.split(" ")[1];
     const payload = verifyAccessToken(token);
 
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        phone: true,
-        role: true,
-        status: true,
-        avatarUrl: true,
-        createdAt: true,
-      },
-    });
+    const rows = await query(
+      "SELECT id, email, name, phone, role, status, avatarUrl, createdAt FROM users WHERE id = ? LIMIT 1",
+      [payload.sub]
+    );
+    const user = rows[0];
 
     if (!user || user.status === "BLOCKED") {
       return res.status(401).json({ error: "Account not found or blocked" });

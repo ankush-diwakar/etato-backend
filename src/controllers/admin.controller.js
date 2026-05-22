@@ -1,4 +1,4 @@
-import prisma from "../config/db.js";
+import { execute, query, withTransaction } from "../config/db.js";
 import { env } from "../config/env.js";
 import fs from "fs";
 import path from "path";
@@ -25,11 +25,15 @@ function normalizeIngredients(value) {
 // ─── DASHBOARD STATS ────────────────────────────────────
 
 export async function getDashboardStats(req, res) {
-  const [customers, menuItems, pendingContacts] = await Promise.all([
-    prisma.user.count({ where: { role: "CUSTOMER" } }),
-    prisma.menuItem.count({ where: { status: "ACTIVE" } }),
-    prisma.contactSubmission.count({ where: { isRead: false } }),
+  const [customerRows, menuRows, contactRows] = await Promise.all([
+    query("SELECT COUNT(*) AS count FROM users WHERE role = 'CUSTOMER'"),
+    query("SELECT COUNT(*) AS count FROM menu_items WHERE status = 'ACTIVE'"),
+    query("SELECT COUNT(*) AS count FROM contact_submissions WHERE isRead = 0"),
   ]);
+
+  const customers = customerRows[0]?.count ?? 0;
+  const menuItems = menuRows[0]?.count ?? 0;
+  const pendingContacts = contactRows[0]?.count ?? 0;
 
   res.json({
     stats: {
@@ -43,26 +47,31 @@ export async function getDashboardStats(req, res) {
 // ─── MENU ITEMS ─────────────────────────────────────────
 
 export async function getMenuItems(req, res) {
-  const items = await prisma.menuItem.findMany({
-    include: { category: { select: { id: true, name: true } } },
-    orderBy: [{ category: { sortOrder: "asc" } }, { sortOrder: "asc" }],
-  });
+  const items = await query(
+    `SELECT mi.*, c.id AS category_id, c.name AS category_name
+     FROM menu_items mi
+     JOIN categories c ON mi.categoryId = c.id
+     ORDER BY c.sortOrder ASC, mi.sortOrder ASC`
+  );
   const normalized = items.map((item) => ({
     ...item,
-    ingredients: normalizeIngredients(item.ingredients),
+    ingredients: normalizeIngredients(typeof item.ingredients === "string" ? JSON.parse(item.ingredients) : item.ingredients),
+    category: {
+      id: item.category_id,
+      name: item.category_name,
+    },
   }));
   res.json({ items: normalized });
 }
 
 export async function getMenuItem(req, res) {
-  const item = await prisma.menuItem.findUnique({
-    where: { id: req.params.id },
-  });
+  const rows = await query("SELECT * FROM menu_items WHERE id = ? LIMIT 1", [req.params.id]);
+  const item = rows[0];
   if (!item) return res.status(404).json({ error: "Item not found" });
   res.json({
     item: {
       ...item,
-      ingredients: normalizeIngredients(item.ingredients),
+      ingredients: normalizeIngredients(typeof item.ingredients === "string" ? JSON.parse(item.ingredients) : item.ingredients),
     },
   });
 }
@@ -74,12 +83,32 @@ export async function createMenuItem(req, res) {
   // Generate slug
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
 
-  const item = await prisma.menuItem.create({
-    data: {
-      name, slug, dressing, categoryId, protein, calories, carbs, fat, fiber,
-      ingredients: normalizedIngredients, price, jain, status, isFeatured, sortOrder
-    },
-  });
+  const id = crypto.randomUUID();
+  await execute(
+    `INSERT INTO menu_items
+      (id, name, slug, dressing, categoryId, protein, calories, carbs, fat, fiber, ingredients, price, jain, status, isFeatured, sortOrder, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+    [
+      id,
+      name,
+      slug,
+      dressing,
+      categoryId,
+      protein || null,
+      calories || null,
+      carbs || null,
+      fat || null,
+      fiber || null,
+      JSON.stringify(normalizedIngredients),
+      price ?? null,
+      jain ? 1 : 0,
+      status,
+      isFeatured ? 1 : 0,
+      sortOrder ?? 0,
+    ]
+  );
+  const rows = await query("SELECT * FROM menu_items WHERE id = ? LIMIT 1", [id]);
+  const item = rows[0];
   res.status(201).json({ item });
 }
 
@@ -94,41 +123,71 @@ export async function updateMenuItem(req, res) {
     data.ingredients = normalizeIngredients(data.ingredients);
   }
 
-  const item = await prisma.menuItem.update({
-    where: { id },
-    data,
-  });
+  const fields = [];
+  const values = [];
+
+  const setField = (key, value) => {
+    fields.push(`${key} = ?`);
+    values.push(value);
+  };
+
+  if (data.name !== undefined) setField("name", data.name);
+  if (data.slug !== undefined) setField("slug", data.slug);
+  if (data.dressing !== undefined) setField("dressing", data.dressing);
+  if (data.categoryId !== undefined) setField("categoryId", data.categoryId);
+  if (data.protein !== undefined) setField("protein", data.protein || null);
+  if (data.calories !== undefined) setField("calories", data.calories || null);
+  if (data.carbs !== undefined) setField("carbs", data.carbs || null);
+  if (data.fat !== undefined) setField("fat", data.fat || null);
+  if (data.fiber !== undefined) setField("fiber", data.fiber || null);
+  if (data.ingredients !== undefined) setField("ingredients", JSON.stringify(data.ingredients));
+  if (data.price !== undefined) setField("price", data.price ?? null);
+  if (data.jain !== undefined) setField("jain", data.jain ? 1 : 0);
+  if (data.status !== undefined) setField("status", data.status);
+  if (data.isFeatured !== undefined) setField("isFeatured", data.isFeatured ? 1 : 0);
+  if (data.sortOrder !== undefined) setField("sortOrder", data.sortOrder ?? 0);
+
+  if (fields.length === 0) {
+    return res.status(400).json({ error: "No fields to update" });
+  }
+
+  fields.push("updatedAt = NOW(3)");
+  values.push(id);
+
+  await execute(`UPDATE menu_items SET ${fields.join(", ")} WHERE id = ?`, values);
+  const rows = await query("SELECT * FROM menu_items WHERE id = ? LIMIT 1", [id]);
+  const item = rows[0];
   res.json({ item });
 }
 
 export async function updateMenuItemStatus(req, res) {
   const { id } = req.params;
   const { status } = req.validated;
-  const item = await prisma.menuItem.update({
-    where: { id },
-    data: { status },
-  });
+  await execute("UPDATE menu_items SET status = ?, updatedAt = NOW(3) WHERE id = ?", [status, id]);
+  const rows = await query("SELECT * FROM menu_items WHERE id = ? LIMIT 1", [id]);
+  const item = rows[0];
   res.json({ item });
 }
 
 export async function deleteMenuItem(req, res) {
   const { id } = req.params;
   // Soft delete
-  await prisma.menuItem.update({
-    where: { id },
-    data: { status: "INACTIVE" },
-  });
+  await execute("UPDATE menu_items SET status = 'INACTIVE', updatedAt = NOW(3) WHERE id = ?", [id]);
   res.json({ message: "Menu item deactivated" });
 }
 
 export async function deleteMenuItemPermanently(req, res) {
   const { id } = req.params;
 
-  const item = await prisma.menuItem.findUnique({ where: { id } });
+  const itemRows = await query("SELECT * FROM menu_items WHERE id = ? LIMIT 1", [id]);
+  const item = itemRows[0];
   if (!item) return res.status(404).json({ error: "Item not found" });
 
-  const orderItemsCount = await prisma.orderItem.count({ where: { menuItemId: id } });
-  if (orderItemsCount > 0) {
+  const orderItemRows = await query(
+    "SELECT COUNT(*) AS count FROM order_items WHERE menuItemId = ?",
+    [id]
+  );
+  if ((orderItemRows[0]?.count ?? 0) > 0) {
     return res.status(400).json({ error: "Cannot delete item with existing orders" });
   }
 
@@ -142,7 +201,7 @@ export async function deleteMenuItemPermanently(req, res) {
     }
   }
 
-  await prisma.menuItem.delete({ where: { id } });
+  await execute("DELETE FROM menu_items WHERE id = ?", [id]);
   res.json({ message: "Menu item deleted" });
 }
 
@@ -152,10 +211,12 @@ export async function uploadMenuItemImage(req, res) {
   const { id } = req.params;
   const imageUrl = `${env.CLIENT_URL.replace('8080', '4000')}/uploads/menu/${req.file.filename}`; // serve from backend
 
-  const item = await prisma.menuItem.update({
-    where: { id },
-    data: { imageUrl },
-  });
+  await execute(
+    "UPDATE menu_items SET imageUrl = ?, updatedAt = NOW(3) WHERE id = ?",
+    [imageUrl, id]
+  );
+  const itemRows = await query("SELECT * FROM menu_items WHERE id = ? LIMIT 1", [id]);
+  const item = itemRows[0];
 
   res.json({ imageUrl, item });
 }
@@ -163,9 +224,7 @@ export async function uploadMenuItemImage(req, res) {
 // ─── CATEGORIES ─────────────────────────────────────────
 
 export async function getCategories(req, res) {
-  const categories = await prisma.category.findMany({
-    orderBy: { sortOrder: "asc" },
-  });
+  const categories = await query("SELECT * FROM categories ORDER BY sortOrder ASC");
   res.json({ categories });
 }
 
@@ -173,9 +232,13 @@ export async function createCategory(req, res) {
   const { name, sortOrder, isActive } = req.validated;
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
 
-  const category = await prisma.category.create({
-    data: { name, slug, sortOrder, isActive },
-  });
+  const id = crypto.randomUUID();
+  await execute(
+    "INSERT INTO categories (id, name, slug, sortOrder, isActive, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, NOW(3), NOW(3))",
+    [id, name, slug, sortOrder ?? 0, isActive ? 1 : 0]
+  );
+  const rows = await query("SELECT * FROM categories WHERE id = ? LIMIT 1", [id]);
+  const category = rows[0];
   res.status(201).json({ category });
 }
 
@@ -183,65 +246,108 @@ export async function updateCategory(req, res) {
   const { id } = req.params;
   const { name, sortOrder, isActive } = req.validated;
 
-  let data = { sortOrder, isActive };
-  if (name) {
-    data.name = name;
-    data.slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
+  const fields = [];
+  const values = [];
+
+  if (name !== undefined) {
+    fields.push("name = ?", "slug = ?");
+    values.push(name, name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, ""));
+  }
+  if (sortOrder !== undefined) {
+    fields.push("sortOrder = ?");
+    values.push(sortOrder);
+  }
+  if (isActive !== undefined) {
+    fields.push("isActive = ?");
+    values.push(isActive ? 1 : 0);
   }
 
-  const category = await prisma.category.update({
-    where: { id },
-    data,
-  });
+  if (fields.length === 0) {
+    return res.status(400).json({ error: "No fields to update" });
+  }
+
+  fields.push("updatedAt = NOW(3)");
+  values.push(id);
+
+  await execute(`UPDATE categories SET ${fields.join(", ")} WHERE id = ?`, values);
+  const rows = await query("SELECT * FROM categories WHERE id = ? LIMIT 1", [id]);
+  const category = rows[0];
   res.json({ category });
 }
 
 export async function deleteCategory(req, res) {
   const { id } = req.params;
-
-  const itemsCount = await prisma.menuItem.count({ where: { categoryId: id } });
-  if (itemsCount > 0) {
+  const itemRows = await query(
+    "SELECT COUNT(*) AS count FROM menu_items WHERE categoryId = ?",
+    [id]
+  );
+  if ((itemRows[0]?.count ?? 0) > 0) {
     return res.status(400).json({ error: "Cannot delete category with linked menu items" });
   }
 
-  await prisma.category.delete({ where: { id } });
+  await execute("DELETE FROM categories WHERE id = ?", [id]);
   res.json({ message: "Category deleted" });
 }
 
 // ─── CUSTOMERS ──────────────────────────────────────────
 
 export async function getCustomers(req, res) {
-  const customers = await prisma.user.findMany({
-    where: { role: "CUSTOMER" },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      name: true,
-      email: true,
-      phone: true,
-      status: true,
-      createdAt: true,
-      subscriptions: {
-        where: {
-          status: { in: ["ACTIVE", "PAUSED", "PENDING"] }
-        },
-        include: {
-          plan: true
-        }
-      }
-    },
-  });
-  res.json({ customers });
+  const customers = await query(
+    "SELECT id, name, email, phone, status, createdAt FROM users WHERE role = 'CUSTOMER' ORDER BY createdAt DESC"
+  );
+
+  if (customers.length === 0) {
+    return res.json({ customers: [] });
+  }
+
+  const userIds = customers.map((c) => c.id);
+  const placeholders = userIds.map(() => "?").join(", ");
+
+  const subscriptions = await query(
+    `SELECT s.*, p.id AS plan_id, p.name AS plan_name, p.type AS plan_type, p.durationDays, p.bowlsCount, p.originalPrice, p.price, p.discountPct, p.perBowlPrice, p.isActive, p.sortOrder
+     FROM subscriptions s
+     JOIN subscription_plans p ON s.planId = p.id
+     WHERE s.status IN ("ACTIVE", "PAUSED", "PENDING")
+       AND s.userId IN (${placeholders})`,
+    userIds
+  );
+
+  const subsByUser = new Map();
+  for (const sub of subscriptions) {
+    const entry = {
+      ...sub,
+      plan: {
+        id: sub.plan_id,
+        name: sub.plan_name,
+        type: sub.plan_type,
+        durationDays: sub.durationDays,
+        bowlsCount: sub.bowlsCount,
+        originalPrice: sub.originalPrice,
+        price: sub.price,
+        discountPct: sub.discountPct,
+        perBowlPrice: sub.perBowlPrice,
+        isActive: sub.isActive,
+        sortOrder: sub.sortOrder,
+      },
+    };
+    if (!subsByUser.has(sub.userId)) subsByUser.set(sub.userId, []);
+    subsByUser.get(sub.userId).push(entry);
+  }
+
+  const enriched = customers.map((c) => ({
+    ...c,
+    subscriptions: subsByUser.get(c.id) || [],
+  }));
+
+  res.json({ customers: enriched });
 }
 
 export async function updateCustomerStatus(req, res) {
   const { id } = req.params;
   const { status } = req.validated;
-  const customer = await prisma.user.update({
-    where: { id },
-    data: { status },
-    select: { id: true, name: true, status: true },
-  });
+  await execute("UPDATE users SET status = ?, updatedAt = NOW(3) WHERE id = ?", [status, id]);
+  const rows = await query("SELECT id, name, status FROM users WHERE id = ? LIMIT 1", [id]);
+  const customer = rows[0];
   res.json({ customer });
 }
 
@@ -250,21 +356,19 @@ export async function adminAddCustomerSubscription(req, res, next) {
     const { id } = req.params;
     const { planId, deliverySlot, dietaryPref, bowlPreference, startDate } = req.validated;
 
-    const user = await prisma.user.findUnique({ where: { id } });
-    if (!user) return res.status(404).json({ error: "User not found" });
+    const userRows = await query("SELECT id FROM users WHERE id = ? LIMIT 1", [id]);
+    if (!userRows[0]) return res.status(404).json({ error: "User not found" });
 
-    // Check existing active or paused subscriptions
-    const existingActiveSub = await prisma.subscription.findFirst({
-      where: {
-        userId: id,
-        status: { in: ["ACTIVE", "PAUSED"] },
-      },
-    });
-    if (existingActiveSub) {
+    const existing = await query(
+      "SELECT id FROM subscriptions WHERE userId = ? AND status IN ('ACTIVE', 'PAUSED') LIMIT 1",
+      [id]
+    );
+    if (existing.length > 0) {
       return res.status(400).json({ error: "User already has an active or paused subscription" });
     }
 
-    const plan = await prisma.subscriptionPlan.findUnique({ where: { id: planId } });
+    const planRows = await query("SELECT * FROM subscription_plans WHERE id = ? LIMIT 1", [planId]);
+    const plan = planRows[0];
     if (!plan || !plan.isActive) {
       return res.status(404).json({ error: "Active subscription plan not found" });
     }
@@ -277,34 +381,54 @@ export async function adminAddCustomerSubscription(req, res, next) {
     const end = new Date(start);
     end.setDate(end.getDate() + plan.durationDays);
 
-    // Create Subscription
-    const subscription = await prisma.subscription.create({
-      data: {
-        userId: id,
-        planId,
-        deliverySlot,
-        dietaryPref: dietaryPref || "REGULAR_VEG",
-        bowlPreference,
-        startDate: start,
-        endDate: end,
-        status: "ACTIVE",
-      },
-      include: {
-        plan: true,
-      }
+    const result = await withTransaction(async (conn) => {
+      const subscriptionId = crypto.randomUUID();
+      await conn.execute(
+        `INSERT INTO subscriptions
+          (id, userId, planId, status, deliverySlot, dietaryPref, bowlPreference, startDate, endDate, pausedDays, specialNotes, createdAt, updatedAt)
+         VALUES (?, ?, ?, 'ACTIVE', ?, ?, ?, ?, ?, 0, NULL, NOW(3), NOW(3))`,
+        [subscriptionId, id, planId, deliverySlot, dietaryPref || "REGULAR_VEG", bowlPreference || null, start, end]
+      );
+
+      const paymentId = crypto.randomUUID();
+      await conn.execute(
+        `INSERT INTO payments
+          (id, subscriptionId, amount, status, method, razorpayPaymentId, paidAt, createdAt, updatedAt)
+         VALUES (?, ?, ?, 'CAPTURED', ?, ?, ?, NOW(3), NOW(3))`,
+        [paymentId, subscriptionId, plan.price * 100, "MANUAL_ADMIN", `MANUAL_${crypto.randomBytes(4).toString("hex").toUpperCase()}`, new Date()]
+      );
+
+      const [subRows] = await conn.query(
+        `SELECT s.*, p.id AS plan_id, p.name AS plan_name, p.type AS plan_type, p.durationDays, p.bowlsCount, p.originalPrice, p.price, p.discountPct, p.perBowlPrice, p.isActive, p.sortOrder
+         FROM subscriptions s
+         JOIN subscription_plans p ON s.planId = p.id
+         WHERE s.id = ?`,
+        [subscriptionId]
+      );
+
+      const subscription = subRows[0];
+      return { subscription, paymentId };
     });
 
-    // Create Captured Payment
-    const payment = await prisma.payment.create({
-      data: {
-        subscriptionId: subscription.id,
-        amount: plan.price * 100, // paise
-        status: "CAPTURED",
-        method: "MANUAL_ADMIN",
-        razorpayPaymentId: `MANUAL_${crypto.randomBytes(4).toString("hex").toUpperCase()}`,
-        paidAt: new Date(),
+    const paymentRows = await query("SELECT * FROM payments WHERE id = ? LIMIT 1", [result.paymentId]);
+    const payment = paymentRows[0];
+
+    const subscription = {
+      ...result.subscription,
+      plan: {
+        id: result.subscription.plan_id,
+        name: result.subscription.plan_name,
+        type: result.subscription.plan_type,
+        durationDays: result.subscription.durationDays,
+        bowlsCount: result.subscription.bowlsCount,
+        originalPrice: result.subscription.originalPrice,
+        price: result.subscription.price,
+        discountPct: result.subscription.discountPct,
+        perBowlPrice: result.subscription.perBowlPrice,
+        isActive: result.subscription.isActive,
+        sortOrder: result.subscription.sortOrder,
       },
-    });
+    };
 
     res.status(201).json({
       message: "Subscription added successfully",
@@ -321,17 +445,35 @@ export async function adminUpdateCustomerSubscriptionStatus(req, res, next) {
     const { subId } = req.params;
     const { status } = req.validated;
 
-    const updated = await prisma.subscription.update({
-      where: { id: subId },
-      data: { status },
-      include: {
-        plan: true,
-      }
-    });
+    await execute("UPDATE subscriptions SET status = ?, updatedAt = NOW(3) WHERE id = ?", [status, subId]);
+    const rows = await query(
+      `SELECT s.*, p.id AS plan_id, p.name AS plan_name, p.type AS plan_type, p.durationDays, p.bowlsCount, p.originalPrice, p.price, p.discountPct, p.perBowlPrice, p.isActive, p.sortOrder
+       FROM subscriptions s
+       JOIN subscription_plans p ON s.planId = p.id
+       WHERE s.id = ?`,
+      [subId]
+    );
+    const updated = rows[0];
+    const subscription = {
+      ...updated,
+      plan: {
+        id: updated.plan_id,
+        name: updated.plan_name,
+        type: updated.plan_type,
+        durationDays: updated.durationDays,
+        bowlsCount: updated.bowlsCount,
+        originalPrice: updated.originalPrice,
+        price: updated.price,
+        discountPct: updated.discountPct,
+        perBowlPrice: updated.perBowlPrice,
+        isActive: updated.isActive,
+        sortOrder: updated.sortOrder,
+      },
+    };
 
     res.json({
       message: `Subscription status updated to ${status}`,
-      subscription: updated,
+      subscription,
     });
   } catch (error) {
     next(error);
@@ -341,9 +483,7 @@ export async function adminUpdateCustomerSubscriptionStatus(req, res, next) {
 // ─── CONTACTS ───────────────────────────────────────────
 
 export async function getContacts(req, res) {
-  const contacts = await prisma.contactSubmission.findMany({
-    orderBy: { createdAt: "desc" },
-  });
+  const contacts = await query("SELECT * FROM contact_submissions ORDER BY createdAt DESC");
   res.json({ contacts });
 }
 
@@ -351,21 +491,28 @@ export async function replyContact(req, res) {
   const { id } = req.params;
   const { replyText, markRead } = req.validated;
 
-  const contact = await prisma.contactSubmission.findUnique({ where: { id } });
+  const contactRows = await query("SELECT * FROM contact_submissions WHERE id = ? LIMIT 1", [id]);
+  const contact = contactRows[0];
   if (!contact) return res.status(404).json({ error: "Contact not found" });
 
-  let data = {};
-  if (markRead) data.isRead = true;
+  const fields = [];
+  const values = [];
+
+  if (markRead) {
+    fields.push("isRead = 1");
+  }
   if (replyText) {
-    data.adminNote = replyText;
-    data.repliedAt = new Date();
-    data.isRead = true;
+    fields.push("adminNote = ?", "repliedAt = ?", "isRead = 1");
+    values.push(replyText, new Date());
   }
 
-  const updated = await prisma.contactSubmission.update({
-    where: { id },
-    data,
-  });
+  if (fields.length > 0) {
+    values.push(id);
+    await execute(`UPDATE contact_submissions SET ${fields.join(", ")} WHERE id = ?`, values);
+  }
+
+  const updatedRows = await query("SELECT * FROM contact_submissions WHERE id = ? LIMIT 1", [id]);
+  const updated = updatedRows[0];
 
   res.json({ contact: updated });
 }
@@ -373,16 +520,13 @@ export async function replyContact(req, res) {
 // ─── BLOG ───────────────────────────────────────────────
 
 export async function getBlogPosts(req, res) {
-  const posts = await prisma.blogPost.findMany({
-    orderBy: { createdAt: "desc" },
-  });
+  const posts = await query("SELECT * FROM blog_posts ORDER BY createdAt DESC");
   res.json({ posts });
 }
 
 export async function getBlogPost(req, res) {
-  const post = await prisma.blogPost.findUnique({
-    where: { id: req.params.id },
-  });
+  const rows = await query("SELECT * FROM blog_posts WHERE id = ? LIMIT 1", [req.params.id]);
+  const post = rows[0];
   if (!post) return res.status(404).json({ error: "Post not found" });
   res.json({ post });
 }
@@ -395,12 +539,25 @@ export async function createBlogPost(req, res) {
   const words = body.split(/\s+/).length;
   const readTime = `${Math.ceil(words / 200)} min read`;
 
-  const post = await prisma.blogPost.create({
-    data: {
-      title, slug, excerpt, body, category, status, readTime,
-      publishedAt: status === "PUBLISHED" ? new Date() : null,
-    },
-  });
+  const id = crypto.randomUUID();
+  await execute(
+    `INSERT INTO blog_posts
+      (id, title, slug, excerpt, body, coverUrl, category, readTime, status, publishedAt, createdAt, updatedAt)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NOW(3), NOW(3))`,
+    [
+      id,
+      title,
+      slug,
+      excerpt || "",
+      body,
+      category || "",
+      readTime,
+      status,
+      status === "PUBLISHED" ? new Date() : null,
+    ]
+  );
+  const rows = await query("SELECT * FROM blog_posts WHERE id = ? LIMIT 1", [id]);
+  const post = rows[0];
   res.status(201).json({ post });
 }
 
@@ -408,23 +565,47 @@ export async function updateBlogPost(req, res) {
   const { id } = req.params;
   const { title, excerpt, body, category, status } = req.validated;
 
-  let data = { excerpt, body, category, status };
-  if (title) {
-    data.title = title;
-    data.slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, "");
+  const fields = [];
+  const values = [];
+
+  if (excerpt !== undefined) {
+    fields.push("excerpt = ?");
+    values.push(excerpt || "");
   }
-  if (body) {
+  if (body !== undefined) {
+    fields.push("body = ?");
+    values.push(body);
     const words = body.split(/\s+/).length;
-    data.readTime = `${Math.ceil(words / 200)} min read`;
+    fields.push("readTime = ?");
+    values.push(`${Math.ceil(words / 200)} min read`);
   }
-  if (status === "PUBLISHED") {
-    data.publishedAt = new Date();
+  if (category !== undefined) {
+    fields.push("category = ?");
+    values.push(category || "");
+  }
+  if (status !== undefined) {
+    fields.push("status = ?");
+    values.push(status);
+    if (status === "PUBLISHED") {
+      fields.push("publishedAt = ?");
+      values.push(new Date());
+    }
+  }
+  if (title !== undefined) {
+    fields.push("title = ?", "slug = ?");
+    values.push(title, title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)+/g, ""));
   }
 
-  const post = await prisma.blogPost.update({
-    where: { id },
-    data,
-  });
+  if (fields.length === 0) {
+    return res.status(400).json({ error: "No fields to update" });
+  }
+
+  fields.push("updatedAt = NOW(3)");
+  values.push(id);
+
+  await execute(`UPDATE blog_posts SET ${fields.join(", ")} WHERE id = ?`, values);
+  const rows = await query("SELECT * FROM blog_posts WHERE id = ? LIMIT 1", [id]);
+  const post = rows[0];
   res.json({ post });
 }
 
@@ -434,54 +615,54 @@ export async function uploadBlogCover(req, res) {
   const { id } = req.params;
   const coverUrl = `${env.CLIENT_URL.replace('8080', '4000')}/uploads/blog/${req.file.filename}`;
 
-  const post = await prisma.blogPost.update({
-    where: { id },
-    data: { coverUrl },
-  });
+  await execute(
+    "UPDATE blog_posts SET coverUrl = ?, updatedAt = NOW(3) WHERE id = ?",
+    [coverUrl, id]
+  );
+  const rows = await query("SELECT * FROM blog_posts WHERE id = ? LIMIT 1", [id]);
+  const post = rows[0];
 
   res.json({ coverUrl, post });
 }
 
 export async function deleteBlogPost(req, res) {
   const { id } = req.params;
-  await prisma.blogPost.delete({ where: { id } });
+  await execute("DELETE FROM blog_posts WHERE id = ?", [id]);
   res.json({ message: "Post deleted" });
 }
 
 export async function getPayments(req, res, next) {
   try {
-    const payments = await prisma.payment.findMany({
-      orderBy: { createdAt: "desc" },
-      include: {
-        order: {
-          select: {
-            orderNumber: true,
-            user: {
-              select: {
-                name: true,
-                email: true
-              }
-            }
-          }
-        },
-        subscription: {
-          select: {
-            id: true,
-            plan: {
-              select: {
-                name: true
-              }
-            },
-            user: {
-              select: {
-                name: true,
-                email: true
-              }
-            }
-          }
-        }
-      }
-    });
+    const rows = await query(
+      `SELECT p.*, 
+              o.orderNumber AS orderNumber,
+              ou.name AS orderUserName,
+              ou.email AS orderUserEmail,
+              s.id AS subscriptionId,
+              sp.name AS subscriptionPlanName,
+              su.name AS subscriptionUserName,
+              su.email AS subscriptionUserEmail
+       FROM payments p
+       LEFT JOIN orders o ON p.orderId = o.id
+       LEFT JOIN users ou ON o.userId = ou.id
+       LEFT JOIN subscriptions s ON p.subscriptionId = s.id
+       LEFT JOIN subscription_plans sp ON s.planId = sp.id
+       LEFT JOIN users su ON s.userId = su.id
+       ORDER BY p.createdAt DESC`
+    );
+
+    const payments = rows.map((row) => ({
+      ...row,
+      order: row.orderNumber ? {
+        orderNumber: row.orderNumber,
+        user: row.orderUserName ? { name: row.orderUserName, email: row.orderUserEmail } : null,
+      } : null,
+      subscription: row.subscriptionId ? {
+        id: row.subscriptionId,
+        plan: row.subscriptionPlanName ? { name: row.subscriptionPlanName } : null,
+        user: row.subscriptionUserName ? { name: row.subscriptionUserName, email: row.subscriptionUserEmail } : null,
+      } : null,
+    }));
 
     res.json({ payments });
   } catch (error) {

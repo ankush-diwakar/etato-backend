@@ -1,37 +1,31 @@
-import { PrismaClient } from "@prisma/client";
 import "dotenv/config";
-
-const prisma = new PrismaClient();
+import { pool, query, withTransaction } from "../src/config/db.js";
 
 const ADMIN_EMAIL = "etatofoods@gmail.com";
 
 async function main() {
     console.log("🧹 Purging database data...");
 
-    const adminUser = await prisma.user.findUnique({
-        where: { email: ADMIN_EMAIL },
-        select: { id: true, email: true },
-    });
+    const adminRows = await query("SELECT id, email FROM users WHERE email = ? LIMIT 1", [ADMIN_EMAIL]);
+    const adminUser = adminRows[0];
 
     if (!adminUser) {
         console.log(`⚠️  Admin user not found for ${ADMIN_EMAIL}.`);
         console.log("⚠️  All users except that email will be deleted.");
     }
 
-    await prisma.$transaction([
-        prisma.orderItem.deleteMany(),
-        prisma.payment.deleteMany(),
-        prisma.order.deleteMany(),
-        prisma.subscription.deleteMany(),
-        prisma.address.deleteMany(),
-        prisma.refreshToken.deleteMany(),
-        prisma.coupon.deleteMany(),
-        prisma.contactSubmission.deleteMany(),
-        prisma.siteSetting.deleteMany(),
-        prisma.user.deleteMany({
-            where: { email: { not: ADMIN_EMAIL } },
-        }),
-    ]);
+    await withTransaction(async (conn) => {
+        await conn.execute("DELETE FROM order_items");
+        await conn.execute("DELETE FROM payments");
+        await conn.execute("DELETE FROM orders");
+        await conn.execute("DELETE FROM subscriptions");
+        await conn.execute("DELETE FROM addresses");
+        await conn.execute("DELETE FROM refresh_tokens");
+        await conn.execute("DELETE FROM coupons");
+        await conn.execute("DELETE FROM contact_submissions");
+        await conn.execute("DELETE FROM site_settings");
+        await conn.execute("DELETE FROM users WHERE email <> ?", [ADMIN_EMAIL]);
+    });
 
     console.log("✅ Purge complete.");
     console.log(
@@ -45,5 +39,5 @@ main()
         process.exit(1);
     })
     .finally(async () => {
-        await prisma.$disconnect();
+        await pool.end();
     });

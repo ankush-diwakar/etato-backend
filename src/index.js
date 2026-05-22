@@ -24,17 +24,19 @@ const app = express();
 app.use(
   helmet({
     crossOriginResourcePolicy: false,
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'", "https:", "data:", "blob:"],
         baseUri: ["'self'"],
         frameAncestors: ["'self'"],
-        imgSrc: ["'self'", "data:", "https:", "blob:"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https:"],
+        imgSrc: ["'self'", "data:", "https:", "blob:", "https://*.razorpay.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https:", "https://*.razorpay.com"],
         fontSrc: ["'self'", "data:", "https:"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "https:"],
-        frameSrc: ["'self'", "https:"],
-        connectSrc: ["'self'", "https:"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "https:", "https://*.razorpay.com"],
+        frameSrc: ["'self'", "https:", "https://*.razorpay.com"],
+        connectSrc: ["'self'", "https:", "https://*.razorpay.com"],
       },
     },
   })
@@ -43,7 +45,9 @@ app.use(cors({
   origin: env.CLIENT_URL,
   credentials: true,
 }));
-app.use(morgan("dev"));
+if (env.NODE_ENV === "development") {
+  app.use(morgan("dev"));
+}
 app.use(express.json({ limit: "10mb" }));
 app.use(cookieParser());
 app.use(apiLimiter);

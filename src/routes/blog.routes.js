@@ -1,58 +1,49 @@
 import { Router } from "express";
-import prisma from "../config/db.js";
+import { query } from "../config/db.js";
 
 const router = Router();
 
 // List published posts
 router.get("/", async (req, res) => {
-  const posts = await prisma.blogPost.findMany({
-    where: { status: "PUBLISHED" },
-    orderBy: { publishedAt: "desc" },
-    select: {
-      id: true,
-      title: true,
-      slug: true,
-      excerpt: true,
-      category: true,
-      coverUrl: true,
-      readTime: true,
-      publishedAt: true,
-    },
-  });
+  const posts = await query(
+    `SELECT id, title, slug, excerpt, category, coverUrl, readTime, publishedAt
+     FROM blog_posts
+     WHERE status = 'PUBLISHED'
+     ORDER BY publishedAt DESC`
+  );
   res.json({ posts });
 });
 
 // Single published post by slug
 router.get("/:slug", async (req, res) => {
-  const post = await prisma.blogPost.findUnique({
-    where: { slug: req.params.slug },
-  });
+  const rows = await query("SELECT * FROM blog_posts WHERE slug = ? LIMIT 1", [req.params.slug]);
+  const post = rows[0];
 
   if (!post || post.status !== "PUBLISHED") {
     return res.status(404).json({ error: "Post not found" });
   }
 
   // Find next post
-  const nextPost = await prisma.blogPost.findFirst({
-    where: { 
-      status: "PUBLISHED", 
-      publishedAt: { lt: post.publishedAt || new Date() }
-    },
-    orderBy: { publishedAt: "desc" },
-    select: {
-      title: true,
-      slug: true,
-      coverUrl: true,
-      category: true,
-    }
-  });
+  const nextRows = await query(
+    `SELECT title, slug, coverUrl, category
+     FROM blog_posts
+     WHERE status = 'PUBLISHED' AND publishedAt < ?
+     ORDER BY publishedAt DESC
+     LIMIT 1`,
+    [post.publishedAt || new Date()]
+  );
+  const nextPost = nextRows[0];
 
   // If no older post, wrap around to the newest
-  const fallbackNext = !nextPost ? await prisma.blogPost.findFirst({
-    where: { status: "PUBLISHED", id: { not: post.id } },
-    orderBy: { publishedAt: "desc" },
-    select: { title: true, slug: true, coverUrl: true, category: true }
-  }) : null;
+  const fallbackRows = !nextPost ? await query(
+    `SELECT title, slug, coverUrl, category
+     FROM blog_posts
+     WHERE status = 'PUBLISHED' AND id <> ?
+     ORDER BY publishedAt DESC
+     LIMIT 1`,
+    [post.id]
+  ) : [];
+  const fallbackNext = fallbackRows[0] || null;
 
   res.json({ post, nextPost: nextPost || fallbackNext });
 });

@@ -1,14 +1,20 @@
-import prisma from "../config/db.js";
+import crypto from "crypto";
+import { execute, query } from "../config/db.js";
 import { isInDeliveryZone } from "../services/geo.service.js";
 
 export async function updatePhone(req, res) {
   const { phone } = req.validated;
 
-  const user = await prisma.user.update({
-    where: { id: req.user.id },
-    data: { phone },
-    select: { id: true, email: true, name: true, phone: true, role: true, status: true, avatarUrl: true, createdAt: true },
-  });
+  await execute(
+    "UPDATE users SET phone = ?, updatedAt = NOW(3) WHERE id = ?",
+    [phone, req.user.id]
+  );
+
+  const rows = await query(
+    "SELECT id, email, name, phone, role, status, avatarUrl, createdAt FROM users WHERE id = ? LIMIT 1",
+    [req.user.id]
+  );
+  const user = rows[0];
 
   res.json({ user });
 }
@@ -16,11 +22,16 @@ export async function updatePhone(req, res) {
 export async function updateProfile(req, res) {
   const { name } = req.validated;
 
-  const user = await prisma.user.update({
-    where: { id: req.user.id },
-    data: { name },
-    select: { id: true, email: true, name: true, phone: true, role: true, status: true, avatarUrl: true, createdAt: true },
-  });
+  await execute(
+    "UPDATE users SET name = ?, updatedAt = NOW(3) WHERE id = ?",
+    [name, req.user.id]
+  );
+
+  const rows = await query(
+    "SELECT id, email, name, phone, role, status, avatarUrl, createdAt FROM users WHERE id = ? LIMIT 1",
+    [req.user.id]
+  );
+  const user = rows[0];
 
   res.json({ user });
 }
@@ -38,29 +49,26 @@ export async function addAddress(req, res) {
   }
 
   // If this is the first address, make it default
-  const count = await prisma.address.count({ where: { userId: req.user.id } });
+  const countRows = await query("SELECT COUNT(*) AS count FROM addresses WHERE userId = ?", [req.user.id]);
+  const count = countRows[0]?.count ?? 0;
 
-  const address = await prisma.address.create({
-    data: {
-      userId: req.user.id,
-      label: label || "Home",
-      fullAddress,
-      pinCode,
-      latitude,
-      longitude,
-      isInZone,
-      isDefault: count === 0,
-    },
-  });
+  const addressId = crypto.randomUUID();
+  await execute(
+    "INSERT INTO addresses (id, userId, label, fullAddress, pinCode, latitude, longitude, isInZone, isDefault, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))",
+    [addressId, req.user.id, label || "Home", fullAddress, pinCode, latitude ?? null, longitude ?? null, isInZone ? 1 : 0, count === 0 ? 1 : 0]
+  );
+
+  const addressRows = await query("SELECT * FROM addresses WHERE id = ? LIMIT 1", [addressId]);
+  const address = addressRows[0];
 
   res.status(201).json({ address, isInZone, distanceKm });
 }
 
 export async function getAddresses(req, res) {
-  const addresses = await prisma.address.findMany({
-    where: { userId: req.user.id },
-    orderBy: { createdAt: "desc" },
-  });
+  const addresses = await query(
+    "SELECT * FROM addresses WHERE userId = ? ORDER BY createdAt DESC",
+    [req.user.id]
+  );
 
   res.json({ addresses });
 }
@@ -68,15 +76,17 @@ export async function getAddresses(req, res) {
 export async function deleteAddress(req, res) {
   const { id } = req.params;
 
-  const address = await prisma.address.findFirst({
-    where: { id, userId: req.user.id },
-  });
+  const addressRows = await query(
+    "SELECT * FROM addresses WHERE id = ? AND userId = ? LIMIT 1",
+    [id, req.user.id]
+  );
+  const address = addressRows[0];
 
   if (!address) {
     return res.status(404).json({ error: "Address not found." });
   }
 
-  await prisma.address.delete({ where: { id } });
+  await execute("DELETE FROM addresses WHERE id = ?", [id]);
 
   res.json({ message: "Address deleted." });
 }
@@ -90,9 +100,11 @@ export async function checkDeliveryZone(req, res) {
 export async function recheckAddressZone(req, res) {
   const { id } = req.params;
 
-  const address = await prisma.address.findFirst({
-    where: { id, userId: req.user.id },
-  });
+  const addressRows = await query(
+    "SELECT * FROM addresses WHERE id = ? AND userId = ? LIMIT 1",
+    [id, req.user.id]
+  );
+  const address = addressRows[0];
 
   if (!address) {
     return res.status(404).json({ error: "Address not found." });
@@ -104,10 +116,13 @@ export async function recheckAddressZone(req, res) {
 
   const { inZone, distanceKm } = isInDeliveryZone(address.latitude, address.longitude);
 
-  const updated = await prisma.address.update({
-    where: { id },
-    data: { isInZone: inZone },
-  });
+  await execute(
+    "UPDATE addresses SET isInZone = ?, updatedAt = NOW(3) WHERE id = ?",
+    [inZone ? 1 : 0, id]
+  );
+
+  const updatedRows = await query("SELECT * FROM addresses WHERE id = ? LIMIT 1", [id]);
+  const updated = updatedRows[0];
 
   res.json({ address: updated, isInZone: inZone, distanceKm });
 }

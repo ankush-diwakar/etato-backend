@@ -1,10 +1,8 @@
-import { PrismaClient } from "@prisma/client";
 import { writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import "dotenv/config";
-
-const prisma = new PrismaClient();
+import { pool, query } from "../src/config/db.js";
 
 function normalizeIngredients(value) {
     if (Array.isArray(value)) {
@@ -57,23 +55,23 @@ async function main() {
     console.log("📦 Exporting current database to prisma/seed.data.js ...");
 
     const seedData = {
-        users: await prisma.user.findMany(),
-        refreshTokens: await prisma.refreshToken.findMany(),
-        addresses: await prisma.address.findMany(),
-        categories: await prisma.category.findMany(),
-        menuItems: (await prisma.menuItem.findMany()).map((item) => ({
+        users: await query("SELECT * FROM users"),
+        refreshTokens: await query("SELECT * FROM refresh_tokens"),
+        addresses: await query("SELECT * FROM addresses"),
+        categories: await query("SELECT * FROM categories"),
+        menuItems: (await query("SELECT * FROM menu_items")).map((item) => ({
             ...item,
-            ingredients: normalizeIngredients(item.ingredients),
+            ingredients: normalizeIngredients(typeof item.ingredients === "string" ? JSON.parse(item.ingredients) : item.ingredients),
         })),
-        coupons: await prisma.coupon.findMany(),
-        subscriptionPlans: await prisma.subscriptionPlan.findMany(),
-        subscriptions: await prisma.subscription.findMany(),
-        orders: await prisma.order.findMany(),
-        orderItems: await prisma.orderItem.findMany(),
-        payments: await prisma.payment.findMany(),
-        contactSubmissions: await prisma.contactSubmission.findMany(),
-        blogPosts: await prisma.blogPost.findMany(),
-        siteSettings: await prisma.siteSetting.findMany(),
+        coupons: await query("SELECT * FROM coupons"),
+        subscriptionPlans: await query("SELECT * FROM subscription_plans"),
+        subscriptions: await query("SELECT * FROM subscriptions"),
+        orders: await query("SELECT * FROM orders"),
+        orderItems: await query("SELECT * FROM order_items"),
+        payments: await query("SELECT * FROM payments"),
+        contactSubmissions: await query("SELECT * FROM contact_submissions"),
+        blogPosts: await query("SELECT * FROM blog_posts"),
+        siteSettings: await query("SELECT * FROM site_settings"),
     };
 
     const seedMeta = {
@@ -102,5 +100,5 @@ main()
         process.exit(1);
     })
     .finally(async () => {
-        await prisma.$disconnect();
+        await pool.end();
     });

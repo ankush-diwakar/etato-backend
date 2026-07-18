@@ -633,6 +633,17 @@ export async function deleteBlogPost(req, res) {
 
 export async function getPayments(req, res, next) {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    const countRows = await query("SELECT COUNT(*) AS total FROM payments");
+    const total = countRows[0]?.total || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    const sumRows = await query("SELECT SUM(amount) AS totalCaptured FROM payments WHERE status IN ('CAPTURED', 'PAID', 'SUCCESS')");
+    const totalCaptured = sumRows[0]?.totalCaptured || 0;
+
     const rows = await query(
       `SELECT p.*, 
               o.orderNumber AS orderNumber,
@@ -648,7 +659,9 @@ export async function getPayments(req, res, next) {
        LEFT JOIN subscriptions s ON p.subscriptionId = s.id
        LEFT JOIN subscription_plans sp ON s.planId = sp.id
        LEFT JOIN users su ON s.userId = su.id
-       ORDER BY p.createdAt DESC`
+       ORDER BY p.createdAt DESC
+       LIMIT ? OFFSET ?`,
+       [limit, offset]
     );
 
     const payments = rows.map((row) => ({
@@ -664,7 +677,117 @@ export async function getPayments(req, res, next) {
       } : null,
     }));
 
-    res.json({ payments });
+    res.json({ payments, total, page, totalPages, totalCaptured });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ─── ORDERS ───────────────────────────────────────────────
+
+export async function getOrders(req, res, next) {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    const countRows = await query("SELECT COUNT(*) AS total FROM orders");
+    const total = countRows[0]?.total || 0;
+    const totalPages = Math.ceil(total / limit);
+
+    const rows = await query(
+      `SELECT o.*, u.name AS userName, u.email AS userEmail, u.phone AS userPhone 
+       FROM orders o 
+       LEFT JOIN users u ON o.userId = u.id 
+       ORDER BY o.createdAt DESC 
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    if (rows.length === 0) {
+      return res.json({ orders: [], total: 0, page, totalPages });
+    }
+
+    const orderIds = rows.map((o) => o.id);
+    const placeholders = orderIds.map(() => "?").join(", ");
+
+    const items = await query(
+      `SELECT oi.*, mi.name AS menuItemName 
+       FROM order_items oi 
+       JOIN menu_items mi ON oi.menuItemId = mi.id 
+       WHERE oi.orderId IN (${placeholders})`,
+      orderIds
+    );
+
+    const itemsByOrder = new Map();
+    for (const item of items) {
+      if (!itemsByOrder.has(item.orderId)) itemsByOrder.set(item.orderId, []);
+      itemsByOrder.get(item.orderId).push(item);
+    }
+
+    const orders = rows.map((row) => ({
+      ...row,
+      user: { name: row.userName, email: row.userEmail, phone: row.userPhone },
+      items: itemsByOrder.get(row.id) || [],
+    }));
+
+    res.json({ orders, total, page, totalPages });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateOrderStatus(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { status } = req.validated;
+
+    await execute("UPDATE orders SET status = ?, updatedAt = NOW(3) WHERE id = ?", [status, id]);
+    
+    res.json({ message: "Order status updated successfully", status });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// ─── SUBSCRIPTIONS ──────────────────────────────────────
+
+export async function getSubscriptions(req, res, next) {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const offset = (page - 1) * limit;
+
+    const countRows = await query("SELECT COUNT(*) AS total FROM subscriptions");
+    const total = countRows[0].total;
+    const totalPages = Math.ceil(total / limit);
+
+    const subscriptions = await query(
+      `SELECT s.*, 
+              u.name AS userName, u.email AS userEmail, u.phone AS userPhone,
+              p.id AS plan_id, p.name AS plan_name, p.durationDays, p.bowlsCount, p.price, p.originalPrice
+       FROM subscriptions s
+       LEFT JOIN users u ON s.userId = u.id
+       LEFT JOIN subscription_plans p ON s.planId = p.id
+       ORDER BY s.createdAt DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+
+    const enriched = subscriptions.map(sub => ({
+      ...sub,
+      user: { name: sub.userName, email: sub.userEmail, phone: sub.userPhone },
+      plan: {
+        id: sub.plan_id,
+        name: sub.plan_name,
+        durationDays: sub.durationDays,
+        bowlsCount: sub.bowlsCount,
+        price: sub.price,
+        originalPrice: sub.originalPrice,
+      }
+    }));
+
+    res.json({ subscriptions: enriched, total, page, totalPages });
   } catch (error) {
     next(error);
   }

@@ -17,6 +17,7 @@ import adminRoutes from "./routes/admin.routes.js";
 import blogRoutes from "./routes/blog.routes.js";
 import orderRoutes from "./routes/order.routes.js";
 import subscriptionRoutes from "./routes/subscription.routes.js";
+import { startSubscriptionJobs } from "./jobs/subscription.job.js";
 
 const app = express();
 
@@ -90,6 +91,8 @@ if (fs.existsSync(frontendDist)) {
 app.use(errorHandler);
 
 // ─── Start Server ────────────────────────────────────────
+startSubscriptionJobs();
+
 app.listen(env.PORT, () => {
   console.log(`\n🌿 Etato Foods API running on http://localhost:${env.PORT}`);
   console.log(`   Environment: ${env.NODE_ENV}`);

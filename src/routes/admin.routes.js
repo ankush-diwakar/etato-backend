@@ -62,13 +62,17 @@ const adminAddSubscriptionSchema = z.object({
 });
 
 const adminUpdateSubscriptionStatusSchema = z.object({
-  status: z.enum(["ACTIVE", "PAUSED", "CANCELLED", "COMPLETED", "EXPIRED"]),
+  status: z.enum(["ACTIVE", "PAUSED", "CANCELLED", "COMPLETED", "EXPIRED", "PENDING"]),
 });
 
 router.get("/customers", adminController.getCustomers);
 router.patch("/customers/:id/status", validate(z.object({ status: z.enum(["ACTIVE", "BLOCKED", "DEACTIVATED"]) })), adminController.updateCustomerStatus);
 router.post("/customers/:id/subscription", validate(adminAddSubscriptionSchema), adminController.adminAddCustomerSubscription);
 router.patch("/customers/subscription/:subId/status", validate(adminUpdateSubscriptionStatusSchema), adminController.adminUpdateCustomerSubscriptionStatus);
+
+// ─── SUBSCRIPTIONS ──────────────────────────────────────
+router.get("/subscriptions", adminController.getSubscriptions);
+router.patch("/subscriptions/:subId/status", validate(adminUpdateSubscriptionStatusSchema), adminController.adminUpdateCustomerSubscriptionStatus);
 
 // ─── CONTACTS ───────────────────────────────────────────
 router.get("/contacts", adminController.getContacts);
@@ -95,5 +99,13 @@ router.post("/blog/:id/cover", setUploadPath("blog"), upload.single("image"), ad
 
 // ─── PAYMENTS ───────────────────────────────────────────
 router.get("/payments", adminController.getPayments);
+
+// ─── ORDERS ─────────────────────────────────────────────
+const orderStatusSchema = z.object({
+  status: z.enum(["PENDING", "CONFIRMED", "PREPARING", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED"]),
+});
+
+router.get("/orders", adminController.getOrders);
+router.patch("/orders/:id/status", validate(orderStatusSchema), adminController.updateOrderStatus);
 
 export default router;

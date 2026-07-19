@@ -792,3 +792,80 @@ export async function getSubscriptions(req, res, next) {
     next(error);
   }
 }
+
+// ─── SUBSCRIPTION PLANS ─────────────────────────────────
+
+export async function getSubscriptionPlans(req, res, next) {
+  try {
+    const plans = await query("SELECT * FROM subscription_plans ORDER BY sortOrder ASC, createdAt DESC");
+    res.json({ plans });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createSubscriptionPlan(req, res, next) {
+  try {
+    const { id, name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive, sortOrder } = req.validated;
+    const planId = id || crypto.randomUUID();
+    await execute(
+      `INSERT INTO subscription_plans (id, name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive, sortOrder, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+      [planId, name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive ? 1 : 0, sortOrder]
+    );
+    const [plan] = await query("SELECT * FROM subscription_plans WHERE id = ?", [planId]);
+    res.status(201).json({ plan, message: "Subscription plan created successfully" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateSubscriptionPlan(req, res, next) {
+  try {
+    const { name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive, sortOrder } = req.validated;
+    const { id } = req.params;
+    
+    let updates = [];
+    let values = [];
+    if (name !== undefined) { updates.push("name = ?"); values.push(name); }
+    if (type !== undefined) { updates.push("type = ?"); values.push(type); }
+    if (durationDays !== undefined) { updates.push("durationDays = ?"); values.push(durationDays); }
+    if (bowlsCount !== undefined) { updates.push("bowlsCount = ?"); values.push(bowlsCount); }
+    if (originalPrice !== undefined) { updates.push("originalPrice = ?"); values.push(originalPrice); }
+    if (price !== undefined) { updates.push("price = ?"); values.push(price); }
+    if (discountPct !== undefined) { updates.push("discountPct = ?"); values.push(discountPct); }
+    if (perBowlPrice !== undefined) { updates.push("perBowlPrice = ?"); values.push(perBowlPrice); }
+    if (isActive !== undefined) { updates.push("isActive = ?"); values.push(isActive ? 1 : 0); }
+    if (sortOrder !== undefined) { updates.push("sortOrder = ?"); values.push(sortOrder); }
+    
+    if (updates.length > 0) {
+      updates.push("updatedAt = NOW(3)");
+      values.push(id);
+      await execute(`UPDATE subscription_plans SET ${updates.join(", ")} WHERE id = ?`, values);
+    }
+    const [plan] = await query("SELECT * FROM subscription_plans WHERE id = ?", [id]);
+    if (!plan) return res.status(404).json({ error: "Subscription plan not found" });
+    res.json({ plan, message: "Subscription plan updated successfully" });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteSubscriptionPlan(req, res, next) {
+  try {
+    const { id } = req.params;
+    const [plan] = await query("SELECT * FROM subscription_plans WHERE id = ?", [id]);
+    if (!plan) return res.status(404).json({ error: "Subscription plan not found" });
+    
+    // Check if there are active subscriptions for this plan
+    const [activeSubs] = await query("SELECT COUNT(*) AS count FROM subscriptions WHERE planId = ? AND status IN ('ACTIVE', 'PAUSED')", [id]);
+    if (activeSubs.count > 0) {
+      return res.status(400).json({ error: "Cannot delete plan with active subscriptions. Try deactivating it instead." });
+    }
+    
+    await execute("DELETE FROM subscription_plans WHERE id = ?", [id]);
+    res.json({ message: "Subscription plan deleted successfully" });
+  } catch (error) {
+    next(error);
+  }
+}

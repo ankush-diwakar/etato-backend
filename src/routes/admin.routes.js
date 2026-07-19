@@ -17,7 +17,11 @@ router.get("/stats", adminController.getDashboardStats);
 const categorySchema = z.object({
   name: z.string().min(2),
   sortOrder: z.number().int().min(0).default(0),
-  isActive: z.boolean().default(true),
+  isActive: z.preprocess((val) => {
+    if (typeof val === 'number') return val === 1;
+    if (typeof val === 'string') return val === '1' || val === 'true';
+    return Boolean(val);
+  }, z.boolean()).default(true),
 });
 
 router.get("/categories", adminController.getCategories);
@@ -69,6 +73,26 @@ router.get("/customers", adminController.getCustomers);
 router.patch("/customers/:id/status", validate(z.object({ status: z.enum(["ACTIVE", "BLOCKED", "DEACTIVATED"]) })), adminController.updateCustomerStatus);
 router.post("/customers/:id/subscription", validate(adminAddSubscriptionSchema), adminController.adminAddCustomerSubscription);
 router.patch("/customers/subscription/:subId/status", validate(adminUpdateSubscriptionStatusSchema), adminController.adminUpdateCustomerSubscriptionStatus);
+
+// ─── SUBSCRIPTION PLANS ─────────────────────────────────
+const subscriptionPlanSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(2),
+  type: z.enum(["TRIAL", "WEEKLY", "MONTHLY"]),
+  durationDays: z.number().int().min(1),
+  bowlsCount: z.number().int().min(1),
+  originalPrice: z.number().int().min(0),
+  price: z.number().int().min(0),
+  discountPct: z.number().int().min(0),
+  perBowlPrice: z.number().int().min(0),
+  isActive: z.boolean().default(true),
+  sortOrder: z.number().int().default(0),
+});
+
+router.get("/subscription-plans", adminController.getSubscriptionPlans);
+router.post("/subscription-plans", validate(subscriptionPlanSchema), adminController.createSubscriptionPlan);
+router.put("/subscription-plans/:id", validate(subscriptionPlanSchema.partial()), adminController.updateSubscriptionPlan);
+router.delete("/subscription-plans/:id", adminController.deleteSubscriptionPlan);
 
 // ─── SUBSCRIPTIONS ──────────────────────────────────────
 router.get("/subscriptions", adminController.getSubscriptions);

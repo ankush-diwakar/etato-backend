@@ -34,12 +34,7 @@ export async function sendWelcomeEmail(user) {
           <p style="margin: 0 0 8px 0; font-size: 14px; color: #1B4332;">✅ Fresh vegetables sourced daily — nothing frozen</p>
           <p style="margin: 0; font-size: 14px; color: #1B4332;">✅ Delivery Mon–Sat in Katraj & nearby areas</p>
         </div>
-        <div style="background: #FFFBE6; border: 2px solid #7A6019; border-radius: 12px; padding: 16px; text-align: center; margin: 24px 0;">
-          <p style="margin: 0; font-size: 14px; color: #7A6019;">🎁 LAUNCH OFFER</p>
-          <p style="margin: 4px 0 0 0; font-size: 18px; font-weight: bold; color: #7A6019;">
-            Use code <span style="letter-spacing: 2px;">ETATO10</span> for 10% off!
-          </p>
-        </div>
+
         <div style="text-align: center; margin: 32px 0 16px;">
           <a href="${env.CLIENT_URL}/menu" style="background: #1B4332; color: #FAFAF7; padding: 14px 32px; border-radius: 50px; text-decoration: none; font-weight: 600; font-size: 14px; display: inline-block;">
             View Our Menu

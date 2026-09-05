@@ -79,14 +79,28 @@ const subscriptionPlanSchema = z.object({
   id: z.string().optional(),
   name: z.string().min(2),
   type: z.enum(["TRIAL", "WEEKLY", "MONTHLY"]),
-  durationDays: z.number().int().min(1),
-  bowlsCount: z.number().int().min(1),
-  originalPrice: z.number().int().min(0),
-  price: z.number().int().min(0),
-  discountPct: z.number().int().min(0),
-  perBowlPrice: z.number().int().min(0),
-  isActive: z.boolean().default(true),
-  sortOrder: z.number().int().default(0),
+  durationDays: z.coerce.number().int().min(1),
+  bowlsCount: z.coerce.number().int().min(1),
+  originalPrice: z.coerce.number().int().min(0),
+  price: z.coerce.number().int().min(0),
+  discountPct: z.coerce.number().int().min(0),
+  perBowlPrice: z.coerce.number().int().min(0),
+  badge: z.string().optional().nullable(),
+  cta: z.string().optional().nullable(),
+  icon: z.string().optional().nullable(),
+  best: z.string().optional().nullable(),
+  bonus: z.string().optional().nullable(),
+  includes: z.union([z.array(z.string()), z.string()]).optional().nullable(),
+  theme: z.string().optional().nullable(),
+  titleColor: z.string().optional().nullable(),
+  iconColor: z.string().optional().nullable(),
+  dividerColor: z.string().optional().nullable(),
+  isActive: z.preprocess((val) => {
+    if (typeof val === 'number') return val === 1;
+    if (typeof val === 'string') return val === '1' || val === 'true';
+    return Boolean(val);
+  }, z.boolean()).default(true),
+  sortOrder: z.coerce.number().int().default(0),
 });
 
 router.get("/subscription-plans", adminController.getSubscriptionPlans);

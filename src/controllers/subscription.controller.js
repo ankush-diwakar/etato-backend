@@ -14,7 +14,13 @@ export const getPlans = async (req, res, next) => {
         const plans = await query(
             "SELECT * FROM subscription_plans WHERE isActive = 1 ORDER BY sortOrder ASC"
         );
-        res.json({ plans });
+        const normalized = plans.map((p) => ({
+            ...p,
+            includes: typeof p.includes === "string" ? (() => {
+                try { return JSON.parse(p.includes); } catch (_) { return []; }
+            })() : (p.includes || []),
+        }));
+        res.json({ plans: normalized });
     } catch (err) {
         next(err);
     }

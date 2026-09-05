@@ -795,10 +795,30 @@ export async function getSubscriptions(req, res, next) {
 
 // ─── SUBSCRIPTION PLANS ─────────────────────────────────
 
+function parseIncludes(includesVal) {
+  if (!includesVal) return [];
+  if (Array.isArray(includesVal)) return includesVal;
+  if (typeof includesVal === "string") {
+    try {
+      const parsed = JSON.parse(includesVal);
+      if (Array.isArray(parsed)) return parsed;
+      return [includesVal];
+    } catch (_) {
+      return includesVal.split("\n").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
 export async function getSubscriptionPlans(req, res, next) {
   try {
     const plans = await query("SELECT * FROM subscription_plans ORDER BY sortOrder ASC, createdAt DESC");
-    res.json({ plans });
+    const normalized = plans.map((plan) => ({
+      ...plan,
+      isActive: Boolean(plan.isActive),
+      includes: parseIncludes(plan.includes),
+    }));
+    res.json({ plans: normalized });
   } catch (error) {
     next(error);
   }
@@ -806,15 +826,71 @@ export async function getSubscriptionPlans(req, res, next) {
 
 export async function createSubscriptionPlan(req, res, next) {
   try {
-    const { id, name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive, sortOrder } = req.validated;
+    const {
+      id,
+      name,
+      type,
+      durationDays,
+      bowlsCount,
+      originalPrice,
+      price,
+      discountPct,
+      perBowlPrice,
+      badge,
+      cta,
+      icon,
+      best,
+      bonus,
+      includes,
+      theme,
+      titleColor,
+      iconColor,
+      dividerColor,
+      isActive,
+      sortOrder,
+    } = req.validated;
+
     const planId = id || crypto.randomUUID();
+    const formattedIncludes = JSON.stringify(parseIncludes(includes));
+
     await execute(
-      `INSERT INTO subscription_plans (id, name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive, sortOrder, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
-      [planId, name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive ? 1 : 0, sortOrder]
+      `INSERT INTO subscription_plans 
+       (id, name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, badge, cta, icon, best, bonus, includes, theme, titleColor, iconColor, dividerColor, isActive, sortOrder, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))`,
+      [
+        planId,
+        name,
+        type,
+        durationDays,
+        bowlsCount,
+        originalPrice,
+        price,
+        discountPct,
+        perBowlPrice,
+        badge || null,
+        cta || null,
+        icon || null,
+        best || null,
+        bonus || null,
+        formattedIncludes,
+        theme || null,
+        titleColor || null,
+        iconColor || null,
+        dividerColor || null,
+        isActive ? 1 : 0,
+        sortOrder,
+      ]
     );
+
     const [plan] = await query("SELECT * FROM subscription_plans WHERE id = ?", [planId]);
-    res.status(201).json({ plan, message: "Subscription plan created successfully" });
+    res.status(201).json({
+      plan: {
+        ...plan,
+        isActive: Boolean(plan.isActive),
+        includes: parseIncludes(plan.includes),
+      },
+      message: "Subscription plan created successfully",
+    });
   } catch (error) {
     next(error);
   }
@@ -822,11 +898,34 @@ export async function createSubscriptionPlan(req, res, next) {
 
 export async function updateSubscriptionPlan(req, res, next) {
   try {
-    const { name, type, durationDays, bowlsCount, originalPrice, price, discountPct, perBowlPrice, isActive, sortOrder } = req.validated;
+    const {
+      name,
+      type,
+      durationDays,
+      bowlsCount,
+      originalPrice,
+      price,
+      discountPct,
+      perBowlPrice,
+      badge,
+      cta,
+      icon,
+      best,
+      bonus,
+      includes,
+      theme,
+      titleColor,
+      iconColor,
+      dividerColor,
+      isActive,
+      sortOrder,
+    } = req.validated;
+
     const { id } = req.params;
-    
+
     let updates = [];
     let values = [];
+
     if (name !== undefined) { updates.push("name = ?"); values.push(name); }
     if (type !== undefined) { updates.push("type = ?"); values.push(type); }
     if (durationDays !== undefined) { updates.push("durationDays = ?"); values.push(durationDays); }
@@ -835,17 +934,36 @@ export async function updateSubscriptionPlan(req, res, next) {
     if (price !== undefined) { updates.push("price = ?"); values.push(price); }
     if (discountPct !== undefined) { updates.push("discountPct = ?"); values.push(discountPct); }
     if (perBowlPrice !== undefined) { updates.push("perBowlPrice = ?"); values.push(perBowlPrice); }
+    if (badge !== undefined) { updates.push("badge = ?"); values.push(badge || null); }
+    if (cta !== undefined) { updates.push("cta = ?"); values.push(cta || null); }
+    if (icon !== undefined) { updates.push("icon = ?"); values.push(icon || null); }
+    if (best !== undefined) { updates.push("best = ?"); values.push(best || null); }
+    if (bonus !== undefined) { updates.push("bonus = ?"); values.push(bonus || null); }
+    if (includes !== undefined) { updates.push("includes = ?"); values.push(JSON.stringify(parseIncludes(includes))); }
+    if (theme !== undefined) { updates.push("theme = ?"); values.push(theme || null); }
+    if (titleColor !== undefined) { updates.push("titleColor = ?"); values.push(titleColor || null); }
+    if (iconColor !== undefined) { updates.push("iconColor = ?"); values.push(iconColor || null); }
+    if (dividerColor !== undefined) { updates.push("dividerColor = ?"); values.push(dividerColor || null); }
     if (isActive !== undefined) { updates.push("isActive = ?"); values.push(isActive ? 1 : 0); }
     if (sortOrder !== undefined) { updates.push("sortOrder = ?"); values.push(sortOrder); }
-    
+
     if (updates.length > 0) {
       updates.push("updatedAt = NOW(3)");
       values.push(id);
       await execute(`UPDATE subscription_plans SET ${updates.join(", ")} WHERE id = ?`, values);
     }
+
     const [plan] = await query("SELECT * FROM subscription_plans WHERE id = ?", [id]);
     if (!plan) return res.status(404).json({ error: "Subscription plan not found" });
-    res.json({ plan, message: "Subscription plan updated successfully" });
+
+    res.json({
+      plan: {
+        ...plan,
+        isActive: Boolean(plan.isActive),
+        includes: parseIncludes(plan.includes),
+      },
+      message: "Subscription plan updated successfully",
+    });
   } catch (error) {
     next(error);
   }

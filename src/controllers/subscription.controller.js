@@ -150,40 +150,61 @@ export const verifySubscriptionPayment = async (req, res, next) => {
         });
 
         // Get full subscription info and user info to send alert
-        const infoRows = await query(
-            `SELECT s.*, u.id AS user_id, u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.role AS user_role,
-                    p.id AS plan_id, p.name AS plan_name, p.type AS plan_type, p.durationDays, p.bowlsCount, p.originalPrice, p.price, p.discountPct, p.perBowlPrice
-             FROM subscriptions s
-             JOIN users u ON s.userId = u.id
-             JOIN subscription_plans p ON s.planId = p.id
-             WHERE s.id = ?`,
-            [payment.subscriptionId]
-        );
-        const subscriptionInfo = infoRows[0];
+        try {
+            const infoRows = await query(
+                `SELECT s.*, u.id AS user_id, u.name AS user_name, u.email AS user_email, u.phone AS user_phone, u.role AS user_role,
+                        p.id AS plan_id, p.name AS plan_name, p.type AS plan_type, p.durationDays, p.bowlsCount, p.originalPrice, p.price, p.discountPct, p.perBowlPrice, p.badge
+                 FROM subscriptions s
+                 JOIN users u ON s.userId = u.id
+                 JOIN subscription_plans p ON s.planId = p.id
+                 WHERE s.id = ?`,
+                [payment.subscriptionId]
+            );
+            const subscriptionInfo = infoRows[0];
 
-        if (subscriptionInfo) {
-            const payload = {
-                ...subscriptionInfo,
-                user: {
-                    id: subscriptionInfo.user_id,
-                    name: subscriptionInfo.user_name,
-                    email: subscriptionInfo.user_email,
-                    phone: subscriptionInfo.user_phone,
-                    role: subscriptionInfo.user_role,
-                },
-                plan: {
-                    id: subscriptionInfo.plan_id,
-                    name: subscriptionInfo.plan_name,
-                    type: subscriptionInfo.plan_type,
-                    durationDays: subscriptionInfo.durationDays,
-                    bowlsCount: subscriptionInfo.bowlsCount,
-                    originalPrice: subscriptionInfo.originalPrice,
-                    price: subscriptionInfo.price,
-                    discountPct: subscriptionInfo.discountPct,
-                    perBowlPrice: subscriptionInfo.perBowlPrice,
-                }
-            };
-            await sendSubscriptionAdminAlert(payload);
+            if (subscriptionInfo) {
+                const addressRows = await query(
+                    "SELECT * FROM addresses WHERE userId = ? ORDER BY isDefault DESC, createdAt DESC LIMIT 1",
+                    [subscriptionInfo.user_id]
+                );
+                const address = addressRows[0] || null;
+
+                const paymentDetails = {
+                    ...payment,
+                    razorpayPaymentId: razorpay_payment_id,
+                    razorpayOrderId: razorpay_order_id,
+                    status: "CAPTURED",
+                    paidAt: new Date(),
+                };
+
+                const payload = {
+                    subscription: subscriptionInfo,
+                    user: {
+                        id: subscriptionInfo.user_id,
+                        name: subscriptionInfo.user_name,
+                        email: subscriptionInfo.user_email,
+                        phone: subscriptionInfo.user_phone,
+                        role: subscriptionInfo.user_role,
+                    },
+                    plan: {
+                        id: subscriptionInfo.plan_id,
+                        name: subscriptionInfo.plan_name,
+                        type: subscriptionInfo.plan_type,
+                        durationDays: subscriptionInfo.durationDays,
+                        bowlsCount: subscriptionInfo.bowlsCount,
+                        originalPrice: subscriptionInfo.originalPrice,
+                        price: subscriptionInfo.price,
+                        discountPct: subscriptionInfo.discountPct,
+                        perBowlPrice: subscriptionInfo.perBowlPrice,
+                        badge: subscriptionInfo.badge,
+                    },
+                    payment: paymentDetails,
+                    address,
+                };
+                await sendSubscriptionAdminAlert(payload);
+            }
+        } catch (mailErr) {
+            console.error("❌ Failed to send subscription admin email alert:", mailErr.message);
         }
 
         res.json({ message: "Subscription payment verified successfully", subscriptionId: payment.subscriptionId });

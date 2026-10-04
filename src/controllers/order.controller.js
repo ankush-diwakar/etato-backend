@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { execute, query, withTransaction } from "../config/db.js";
 import Razorpay from "razorpay";
 import { env } from "../config/env.js";
+import { sendOrderPaymentAdminAlert } from "../services/mail.service.js";
 
 
 const razorpay = new Razorpay({
@@ -188,16 +189,66 @@ export const verifyPayment = async (req, res, next) => {
 
       if (!payment) return res.status(404).json({ error: "Payment record not found" });
 
+      const paidAt = new Date();
       await withTransaction(async (conn) => {
         await conn.execute(
           `UPDATE payments SET razorpayPaymentId = ?, razorpaySignature = ?, status = 'CAPTURED', paidAt = ?, updatedAt = NOW(3) WHERE id = ?`,
-          [razorpay_payment_id, razorpay_signature, new Date(), payment.id]
+          [razorpay_payment_id, razorpay_signature, paidAt, payment.id]
         );
         await conn.execute(
           "UPDATE orders SET status = 'CONFIRMED', updatedAt = NOW(3) WHERE id = ?",
           [payment.orderId]
         );
       });
+
+      // Send email notification to all admins with order & payment details
+      try {
+        const [orderRows, itemRows] = await Promise.all([
+          query(
+            `SELECT o.*, 
+                    u.name AS userName, u.email AS userEmail, u.phone AS userPhone,
+                    a.label AS addressLabel, a.fullAddress, a.pinCode
+             FROM orders o
+             JOIN users u ON o.userId = u.id
+             LEFT JOIN addresses a ON o.addressId = a.id
+             WHERE o.id = ? LIMIT 1`,
+            [payment.orderId]
+          ),
+          query(
+            `SELECT oi.*, mi.name AS menuItemName 
+             FROM order_items oi 
+             JOIN menu_items mi ON oi.menuItemId = mi.id 
+             WHERE oi.orderId = ?`,
+            [payment.orderId]
+          ),
+        ]);
+
+        const orderData = orderRows[0];
+        if (orderData) {
+          await sendOrderPaymentAdminAlert({
+            order: orderData,
+            items: itemRows || [],
+            payment: {
+              ...payment,
+              razorpayPaymentId: razorpay_payment_id,
+              status: "CAPTURED",
+              paidAt,
+            },
+            user: {
+              name: orderData.userName,
+              email: orderData.userEmail,
+              phone: orderData.userPhone,
+            },
+            address: {
+              label: orderData.addressLabel,
+              fullAddress: orderData.fullAddress,
+              pinCode: orderData.pinCode,
+            },
+          });
+        }
+      } catch (mailErr) {
+        console.error("❌ Failed to send order admin email alert:", mailErr.message);
+      }
 
       res.json({ message: "Payment verified successfully", orderId: payment.orderId });
     } else {
